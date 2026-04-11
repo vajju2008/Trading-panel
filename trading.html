@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Vatsal Hub: Offline Pro</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <style>
+        /* --- CORE VISUALS --- */
+        :root {
+            --neon-blue: #2962ff;
+            --neon-green: #01ff88;
+            --neon-red: #ff5252;
+            --neon-amber: #ffb300;
+            --bg-dark: #131722;
+            --card-bg: #1e222d;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-dark); color: #fff; margin: 0; overflow: hidden; }
+        * { box-sizing: border-box; }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 0 15px; height: 60px; background: var(--bg-dark); border-bottom: 1px solid #333; }
+        .title-group { display: flex; align-items: center; gap: 10px; }
+        .title { font-weight: bold; color: #d1d4dc; white-space: nowrap; margin-right: 15px; }
+
+        /* BUTTONS */
+        .btn { background: var(--neon-blue); color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-weight: bold; transition: 0.2s; }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-outline { background: transparent; border: 1px solid #555; color: #ccc; }
+        .btn-outline:hover { border-color: #fff; color: #fff; }
+        
+        .btn-backtest { border: 1px solid var(--neon-amber); color: var(--neon-amber); background: transparent; }
+        .btn-backtest.active { background: var(--neon-amber); color: #000; box-shadow: 0 0 10px rgba(255, 179, 0, 0.3); }
+        
+        /* LAYOUT GRID */
+        .main-container { display: grid; grid-template-columns: 1fr 350px; height: calc(100vh - 100px); padding: 10px; gap: 10px; }
+        .chart-box { background: var(--card-bg); border-radius: 8px; border: 1px solid #333; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        .sidebar { display: flex; flex-direction: column; gap: 10px; }
+        
+        /* REPLAY UI (OVERLAY) */
+        #replay-layer { display: none; flex-direction: column; width: 100%; height: 100%; background: #000; position: absolute; z-index: 10; top: 0; left: 0; }
+        #replay-layer.visible { display: flex; }
+        
+        .replay-toolbar { padding: 10px; background: #181b26; border-bottom: 1px solid #333; display: flex; gap: 10px; align-items: center; }
+        .replay-chart-area { flex: 1; position: relative; }
+        
+        .replay-controls { 
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); 
+            background: rgba(30, 34, 45, 0.9); padding: 10px 20px; border-radius: 30px; 
+            border: 1px solid #444; display: flex; gap: 15px; align-items: center; z-index: 20; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(5px);
+        }
+
+        /* MODALS */
+        .modal { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); }
+        .modal-content { background: var(--card-bg); margin: 10% auto; padding: 25px; width: 350px; border-radius: 12px; border: 1px solid #444; position: relative; animation: popIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        @keyframes popIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        
+        .input-group { margin-bottom: 12px; }
+        .input-label { display: block; font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+        .input-field { width: 100%; padding: 10px; background: #131722; border: 1px solid #444; color: #fff; border-radius: 4px; outline: none; }
+        .input-field:focus { border-color: var(--neon-blue); }
+
+        /* SIMULATION THEME */
+        body.sim-mode .btn-backtest { background: var(--neon-amber); color: #000; }
+        body.sim-mode .input-field:focus { border-color: var(--neon-amber); }
+        
+        /* FOOTER */
+        .ticker { position: fixed; bottom: 0; width: 100%; height: 40px; background: var(--card-bg); border-top: 1px solid #333; }
+        
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .main-container { grid-template-columns: 1fr; grid-template-rows: 1fr 300px; }
+            .replay-controls { width: 90%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="title-group">
+            <div class="title"> Vatsal'sHub</div>
+            <button class="btn" onclick="openLogModal()">📝 Log Trade</button>
+            <button class="btn btn-backtest" id="btn-mode" onclick="toggleMode()">🟡 Backtest Mode</button>
+            <button class="btn btn-outline" onclick="openJournal()">📊 Stats</button>
+            <button class="btn btn-outline" onclick="openCalc()">🧮 Calc</button>
+        </div>
+        <div style="font-size: 0.8rem; color:#888;">IST: <span id="clock">--:--</span></div>
+    </div>
+
+    <div class="main-container">
+        
+        <div class="chart-box">
+            
+            <div id="live-chart-container" style="height:100%; width:100%;">
+                <div class="tradingview-widget-container" style="height:100%;width:100%">
+                    <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+                    { "autosize": true, "symbol": "OANDA:XAUUSD", "interval": "15", "timezone": "Asia/Kolkata", "theme": "dark", "style": "1", "locale": "en", "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true, "details": true, "studies": ["VbPFixed@tv-basicstudies"], "support_host": "https://www.tradingview.com" }
+                    </script>
+                </div>
+            </div>
+
+            <div id="replay-layer">
+                <div class="replay-toolbar">
+                    <span style="color:var(--neon-amber); font-weight:bold;">LOCAL SIMULATOR</span>
+                    <select id="sim-type" class="input-field" style="width:120px; padding:6px;">
+                        <option value="trending">Trend Market</option>
+                        <option value="volatile">Volatile Market</option>
+                        <option value="ranging">Ranging Market</option>
+                    </select>
+                    <button class="btn btn-outline" onclick="generateMarket()">🎲 Generate New Scenario</button>
+                </div>
+                
+                <div id="lw-chart" class="replay-chart-area"></div>
+                
+                <div class="replay-controls">
+                    <button class="btn btn-outline" onclick="stepCandle()">▶ Step</button>
+                    <button class="btn btn-outline" onclick="togglePlay()" id="play-btn">► Play</button>
+                    <div style="font-size:0.8rem; color:#888; margin-left:10px;">Speed</div>
+                    <input type="range" id="speed" min="10" max="500" value="200" style="width:100px;">
+                </div>
+            </div>
+
+        </div>
+
+        <div class="sidebar">
+            <div class="chart-box" style="flex:1">
+                <div class="tradingview-widget-container" style="height:100%;width:100%">
+                    <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js" async>
+                    { "interval": "15m", "width": "100%", "height": "100%", "symbol": "OANDA:XAUUSD", "showIntervalTabs": true, "displayMode": "single", "locale": "en", "colorTheme": "dark" }
+                    </script>
+                </div>
+            </div>
+            <div class="chart-box" style="flex:1">
+                <div class="tradingview-widget-container" style="height:100%;width:100%">
+                    <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-events.js" async>
+                    { "width": "100%", "height": "100%", "colorTheme": "dark", "isTransparent": true, "locale": "en", "importanceFilter": "-1,0,1" }
+                    </script>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="logModal" class="modal">
+        <div class="modal-content">
+            <span style="float:right; cursor:pointer;" onclick="document.getElementById('logModal').style.display='none'">✕</span>
+            <h3 style="margin-top:0;">📝 Log Trade (<span id="log-mode-text">LIVE</span>)</h3>
+            <div class="input-group">
+                <label class="input-label">Symbol</label>
+                <input id="l-sym" class="input-field" placeholder="e.g. GOLD">
+            </div>
+            <div class="input-group">
+                <label class="input-label">Profit/Loss ($)</label>
+                <input id="l-pnl" type="number" class="input-field" placeholder="e.g. 50 or -20">
+            </div>
+            <button class="btn" style="width:100%; padding:12px;" onclick="saveTrade()">Save Log</button>
+        </div>
+    </div>
+
+    <div id="journalModal" class="modal">
+        <div class="modal-content" style="width: 500px;">
+            <span style="float:right; cursor:pointer;" onclick="document.getElementById('journalModal').style.display='none'">✕</span>
+            <h3 style="margin-top:0;">📊 Performance Stats</h3>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; text-align:center; margin-bottom:20px;">
+                <div style="background:#131722; padding:15px; border-radius:8px;">Total P&L<br><b id="stat-pnl" style="font-size:1.5rem">$0.00</b></div>
+                <div style="background:#131722; padding:15px; border-radius:8px;">Win Rate<br><b id="stat-wr" style="font-size:1.5rem">0%</b></div>
+            </div>
+            <div style="max-height:250px; overflow-y:auto; border-top:1px solid #333;">
+                <table style="width:100%; font-size:0.9rem; color:#ccc; border-collapse:collapse;">
+                    <thead><tr style="text-align:left; border-bottom:1px solid #444;"><th style="padding:10px;">Date</th><th>Sym</th><th>P&L</th></tr></thead>
+                    <tbody id="stat-table"></tbody>
+                </table>
+            </div>
+            <button class="btn btn-outline" style="width:100%; margin-top:15px;" onclick="clearData()">Reset Data</button>
+        </div>
+    </div>
+
+    <div class="ticker">
+        <div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div><script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>{ "symbols": [ { "proName": "TVC:DXY", "title": "DXY" }, { "proName": "OANDA:XAUUSD", "title": "GOLD" }, { "proName": "OANDA:XAGUSD", "title": "SILVER" }, { "proName": "FOREXCOM:DJI", "title": "US30" } ], "showSymbolLogo": true, "colorTheme": "dark", "isTransparent": false, "displayMode": "adaptive", "locale": "en" }</script></div>
+    </div>
+
+    <script>
+        // --- 1. SYSTEM CLOCK ---
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').innerText = now.toLocaleTimeString('en-US', {timeZone:'Asia/Kolkata', hour12:false, hour:'2-digit', minute:'2-digit'});
+        }
+        setInterval(updateClock, 1000);
+
+        // --- 2. MODE MANAGEMENT ---
+        let isSimMode = false;
+        
+        function toggleMode() {
+            isSimMode = !isSimMode;
+            const btn = document.getElementById('btn-mode');
+            const liveC = document.getElementById('live-chart-container');
+            const replayC = document.getElementById('replay-layer');
+            const logTxt = document.getElementById('log-mode-text');
+
+            if (isSimMode) {
+                // ENTER SIMULATION
+                document.body.classList.add('sim-mode');
+                btn.classList.add('active');
+                btn.innerText = "🔴 Exit Backtest";
+                liveC.style.display = 'none';
+                replayC.classList.add('visible');
+                logTxt.innerText = "SIMULATION";
+                if(!chart) initChart(); // First time init
+            } else {
+                // EXIT SIMULATION
+                document.body.classList.remove('sim-mode');
+                btn.classList.remove('active');
+                btn.innerText = "🟡 Backtest Mode";
+                replayC.classList.remove('visible');
+                liveC.style.display = 'block';
+                logTxt.innerText = "LIVE";
+                stopPlay();
+            }
+        }
+
+        // --- 3. MARKET SIMULATOR ENGINE (LOCAL) ---
+        let chart, candleSeries;
+        let visibleData = [], futureData = [];
+        let isPlaying = false, playTimer;
+
+        function initChart() {
+            const container = document.getElementById('lw-chart');
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth, height: container.clientHeight,
+                layout: { background: { color: '#000000' }, textColor: '#d1d4dc' },
+                grid: { vertLines: { color: '#2b2b43' }, horzLines: { color: '#2b2b43' } },
+                timeScale: { timeVisible: true, secondsVisible: false },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            });
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#00ff88', downColor: '#ff5252', borderVisible: false, wickUpColor: '#00ff88', wickDownColor: '#ff5252'
+            });
+            
+            // Auto-resize
+            new ResizeObserver(entries => {
+                if(entries[0]) chart.applyOptions({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
+            }).observe(container);
+
+            generateMarket(); // Auto load first scenario
+        }
+
+        // ** THE MATHEMATICAL ENGINE: Generates data LOCALLY (No API) **
+        function generateMarket() {
+            const type = document.getElementById('sim-type').value;
+            let price = 2000; // Starting price (like Gold)
+            let time = Math.floor(Date.now() / 1000) - (1000 * 3600);
+            let data = [];
+            
+            // Simulation Parameters
+            let trend = 0; 
+            let volatility = 2.0;
+
+            if(type === 'trending') { trend = 0.5; volatility = 3.0; } // Strong moves
+            else if(type === 'volatile') { trend = 0; volatility = 8.0; } // Crazy wicks
+            else { trend = 0; volatility = 1.5; } // Ranging
+
+            for (let i = 0; i < 1000; i++) {
+                // Random Walk Math
+                let change = (Math.random() - 0.5) * volatility + (Math.random() > 0.5 ? trend : -trend * 0.2);
+                if(Math.random() > 0.95) change *= 3; // Occasional impulse candle
+
+                let open = price;
+                let close = price + change;
+                let high = Math.max(open, close) + Math.random() * volatility;
+                let low = Math.min(open, close) - Math.random() * volatility;
+                
+                data.push({ time: time + (i * 3600), open, high, low, close });
+                price = close;
+            }
+
+            // Split: Show 300, Hide 700 for replay
+            visibleData = data.slice(0, 300);
+            futureData = data.slice(300);
+            
+            candleSeries.setData(visibleData);
+            chart.timeScale().fitContent();
+            stopPlay();
+        }
+
+        function stepCandle() {
+            if(futureData.length > 0) {
+                const next = futureData.shift();
+                candleSeries.update(next);
+            } else {
+                alert("Scenario Ended. Click Generate to restart.");
+                stopPlay();
+            }
+        }
+
+        function togglePlay() { if(isPlaying) stopPlay(); else startPlay(); }
+        
+        function startPlay() {
+            isPlaying = true;
+            document.getElementById('play-btn').innerText = "|| Pause";
+            const speed = 550 - document.getElementById('speed').value;
+            playTimer = setInterval(stepCandle, speed);
+        }
+        
+        function stopPlay() {
+            isPlaying = false;
+            document.getElementById('play-btn').innerText = "► Play";
+            clearInterval(playTimer);
+        }
+
+        // --- 4. JOURNAL SYSTEM (LIVE vs SIM) ---
+        const DB_KEYS = { live: 'vTrade_LIVE', sim: 'vTrade_SIM' };
+
+        function openLogModal() { document.getElementById('logModal').style.display = 'block'; }
+        
+        function saveTrade() {
+            const sym = document.getElementById('l-sym').value;
+            const pnl = parseFloat(document.getElementById('l-pnl').value);
+            if(!sym || isNaN(pnl)) return;
+
+            const key = isSimMode ? DB_KEYS.sim : DB_KEYS.live;
+            const trades = JSON.parse(localStorage.getItem(key)) || [];
+            
+            trades.push({ date: new Date().toLocaleDateString(), sym, pnl });
+            localStorage.setItem(key, JSON.stringify(trades));
+            
+            document.getElementById('logModal').style.display = 'none';
+            alert(`Trade Saved to ${isSimMode ? "SIMULATION" : "LIVE"} Journal`);
+        }
+
+        function openJournal() {
+            const modal = document.getElementById('journalModal');
+            modal.style.display = 'block';
+            
+            const key = isSimMode ? DB_KEYS.sim : DB_KEYS.live;
+            const trades = JSON.parse(localStorage.getItem(key)) || [];
+            
+            let total = 0, wins = 0;
+            const tbody = document.getElementById('stat-table');
+            tbody.innerHTML = "";
+
+            trades.reverse().forEach(t => {
+                total += t.pnl;
+                if(t.pnl > 0) wins++;
+                const color = t.pnl >= 0 ? '#00ff88' : '#ff5252';
+                tbody.innerHTML += `<tr><td style="padding:10px;">${t.date}</td><td>${t.sym}</td><td style="color:${color}; font-weight:bold;">$${t.pnl}</td></tr>`;
+            });
+
+            document.getElementById('stat-pnl').innerText = "$" + total.toFixed(2);
+            document.getElementById('stat-pnl').style.color = total >= 0 ? (isSimMode ? '#ffb300' : '#00ff88') : '#ff5252';
+            document.getElementById('stat-wr').innerText = trades.length ? Math.round((wins/trades.length)*100) + "%" : "0%";
+        }
+
+        function clearData() {
+            const key = isSimMode ? DB_KEYS.sim : DB_KEYS.live;
+            if(confirm("Clear ALL data for this mode?")) {
+                localStorage.removeItem(key);
+                openJournal();
+            }
+        }
+
+        // --- 5. CALCULATOR ---
+        function openCalc() { alert("Use the comprehensive calculator provided earlier!"); }
+    </script>
+</body>
+</html>
